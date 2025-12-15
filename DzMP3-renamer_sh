@@ -1,0 +1,922 @@
+#!/bin/bash
+#
+# DzMP3-renamer_sh
+# Written - Dee 2022 Dec
+
+shopt -s nullglob   # hide globs that don't match anything
+shopt -s nocaseglob # match globs regardless of capitalization
+
+: <<'notes'
+problem solved by tshiono
+https://stackoverflow.com/questions/74621128/eyed3-with-find-xargs-to-set-mp3-tag/74621857#74621857
+
+in case of CRC Lame error, set log level to 'error'
+  eyeD3 -l error ...
+
+notes
+
+bold="\e[1m"
+yellow="\e[0;33m\e[1m"
+blue="\e[0;94m"
+red="\e[0;91m"
+white="\e[0;97m"
+reset="\e[0m"
+
+pause() {
+  echo -en "${blue}\tPress ${yellow}\"Enter\"${blue} to continue "
+  read userentry
+}
+rem_all_comments() {
+  echo -e "removing all comments"
+  are_we_committing
+
+  if [ "$committing" = 'yes' ]; then
+    find . -maxdepth 1 -type f -name "*\.mp3" -print0 | while IFS= read -r -d '' file; do
+      echo -e "\t${blue}$file${reset}"
+      if ! eyeD3 -2 "$file" 2>&1 | grep -q "No ID3 v2.x tag"; then
+        echo -e "\t${blue}ID3 v2.x ${white}Found${reset}"
+      else
+        echo -e "\t${blue}ID3 v2.x ${white}Not Found${reset}"
+      fi
+    done
+  fi
+}
+
+rem_frame() {
+
+  echo -e -n "${yellow}remove frame "
+
+  # grab a random file from PWD
+  f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
+  option="--user-text-frame="
+
+  echo -e "${blue} looking for frames tag..."
+  echo -e "$(eyeD3 -l error "$f" | awk '/Frame:/ {print $3}' | sed 's/]//')"
+
+  select descriptor in $(eyeD3 -l error "$f" | awk '/Frame:/ {print $3}' | sed 's/]//'); do
+    echo -e "${white}descriptor chosen $descriptor${reset}"
+    newdata="$descriptor"
+    break
+  done
+
+  echo "eyeD3 \"$f\" $option${newdata}"
+
+  if [ -z "$newdata" ]; then
+    # print_help
+    echo -e " \t no data quitting.\n"
+  else
+    echo -e "${yellow} about to modify all mp3s in PWD"
+    are_we_committing
+    if [ "$committing" = 'yes' ]; then
+      for f in *.mp3; do
+        eyeD3 -l error "$f" $option${newdata}
+        # ftb="$(basename "${f%.mp3}")"
+      done
+    else
+      echo -e "${blue}ok... we do nothing then...bailing${reset}"
+    fi
+  fi
+} # rem_object
+
+rem_v1() {
+  option="--remove-v1"
+  echo -e "${yellow}\tremove v1 tags ${reset}"
+
+  echo -e "${blue}eyeD3  $option"
+  echo -e "${yellow} about to modify all mp3s in PWD"
+  are_we_committing
+  if [ "$committing" = 'yes' ]; then
+    for f in *.mp3; do
+      eyeD3 -l error $option "$f"
+    done
+  else
+    echo -e "${blue}ok... we do nothing then...bailing${reset}"
+  fi
+  echo -e ${reset}
+
+} # rem_v1
+
+check_tag_version() {
+  echo -e "check which tags exist"
+  are_we_committing
+  if [[ "$committing" = "yes" ]]; then
+    find . -maxdepth 1 -type f -name "*\.mp3" -print0 | while IFS= read -r -d '' file; do
+      # check v1
+      if ! eyeD3 -1 "$file" 2>&1 | grep -q "No ID3 v1.x tag"; then
+        if [[ $? = 0 ]]; then
+          echo -en "${yellow}ID3 v1.x tags in ${reset}"
+        fi
+
+      else
+        echo -en "${red}ID3 v1.x tags not in ${reset}"
+      fi
+      echo -e "${blue}\"$file\"${reset}"
+      # Check v2
+      if ! eyeD3 -2 "$file" 2>&1 | grep -q "No ID3 v2.x tag"; then
+        if [[ $? = 0 ]]; then
+          echo -en "${yellow}ID3 v2.x tags in ${reset}"
+        fi
+
+      else
+        echo -en "\t${red}ID3 v2.x tags not in ${reset}"
+      fi
+      echo -e "${blue}\"$file\"${reset}"
+    done
+  else
+    echo -e "${red}not committed, bailing.\n ${reset}"
+  fi
+  pause
+  echo
+}
+
+remove_all_tags() {
+  # --remove-all          Remove ID3 v1.x and v2.x tags.
+  echo -e "${yellow}\tRemove all tags${reset}"
+  option="--remove-all"
+
+  echo -e "${blue}eyeD3 ${yellow}$option"
+  echo -e "${yellow} about to modify all mp3s in PWD"
+  are_we_committing
+  if [ "$committing" = 'yes' ]; then
+    for f in *.mp3; do
+      eyeD3 -l error $option "$f"
+    done
+  else
+    echo -e "${blue}ok... we do nothing then...bailing${reset}"
+  fi
+  echo -e ${reset}
+
+} # remove_all_tags
+
+convert_to_v23() {
+  echo -e "${yellow}\tconvert tags to v2.3 ${reset}"
+
+  # grab a random file from PWD
+  f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
+  option="--to-v2.3"
+
+  echo -e "${blue}eyeD3 $option \"$f\""
+  echo -e "${yellow} about to modify all mp3s in PWD"
+  are_we_committing
+  if [ "$committing" = 'yes' ]; then
+    for f in *.mp3; do
+      eyeD3 -l error $option "$f"
+    done
+  else
+    echo -e "${blue}ok... we do nothing then...bailing${reset}"
+  fi
+  echo -e ${reset}
+
+} # v23
+
+list_genres() {
+  echo "eyeD3 --plugin=genres"
+  echo -e "Search term"
+  echo -e "Type one word to filter by; (eg. pop, rock, wave)"
+  echo -e "[Enter] for all"
+  read -e -p " > " userentry
+  if [ -z "$userentry" ]; then
+    echo -e "\tShowing all then.\n"
+    eyeD3 --plugin=genres
+  else
+    eyeD3 --plugin=genres | grep -i "$userentry"
+    echo -e "\n"
+  fi
+} # list_genres
+
+set_genre() {
+  f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
+  eyeD3 -l error "$f"
+
+  echo "genre faves"
+  echo -e "\t12 Pop"
+  echo -e "\t66 New Wave"
+  echo -e "\t81 Fold-Rock"
+  echo -e "\t101 Speech"
+  echo -e "\t147 Synthpop"
+  echo -e "\t183 Audiobook"
+  echo -e -n "set all genre values to "
+  read -e -p " > " newdata
+  echo -e ${reset}
+
+  if [ -z "$newdata" ]; then
+    # print_help
+    echo -e " \t no data quitting.\n"
+  else
+    newtag="G" # -a for album STRING
+    echo "set_genre \"$newtag\" \"$newdata\""
+
+    are_we_committing
+
+    if [ "$committing" = 'yes' ]; then
+      for f in *.mp3; do
+        # SPECIFY TAG DATA HERE
+        ftb="$(basename "${f%.mp3}")"
+
+        if [[ -z "$newtag" ]]; then
+          echo -e "${red}no tag set."
+        elif [[ -z "$newdata" ]]; then
+          echo -e "${red}no data to set."
+        else
+          set_tag_data
+        fi
+      done
+    else
+      echo -e "ok... we do nothing then."
+      echo "bailing"
+    fi
+  fi
+
+} # set_genre
+
+set_artist() {
+  f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
+  eyeD3 -l error "$f"
+  echo -e -n "${yellow}set all artist values to "
+  read -e -p " > " newdata
+  echo -e ${reset}
+
+  if [ -z "$newdata" ]; then
+    # print_help
+    echo -e " \t no data quitting.\n"
+  else
+    newtag="a" # -a for artist STRING
+    echo "set_artist \"$newtag\" \"$newdata\""
+
+    are_we_committing
+    for f in *.mp3; do
+      # SPECIFY TAG DATA HERE
+      if [[ "$newtag" && "$newdata" ]]; then
+        echo -e "${yellow}both here${reset}"
+        set_tag_data
+      else
+        echo -e "${red}no data to set."
+      fi
+    done
+  fi
+} # set_artist
+
+set_album() {
+  f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
+  eyeD3 -l error "$f"
+  echo -e -n "${yellow}set all Album values to "
+  read -e -p " > " newdata
+  echo -e ${reset}
+
+  if [ -z "$newdata" ]; then
+    # print_help
+    echo -e " \t no data quitting.\n"
+  else
+    newtag="A" # -a for Album STRING
+    echo -e "${blue}set_album \"$newtag\" \"$newdata\""
+    are_we_committing
+    if [[ -z "$newtag" ]]; then
+      echo -e "${red}no tag set."
+    elif [[ -z "$newdata" ]]; then
+      echo -e "${red}no data to set."
+    elif [ "$committing" = 'yes' ]; then
+      for f in *.mp3; do
+        set_tag_data
+      done
+    else
+      echo -e "${blue}ok... we do nothing then...bailing${reset}"
+    fi
+  fi
+} # set_album
+
+set_year() {
+  f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
+  eyeD3 -l error "$f"
+
+  echo -e -n "${yellow}set all Year tags to "
+  read -e -p " > " newdata
+  echo -e ${reset}
+
+  if [ -z "$newdata" ]; then
+    # print_help
+    echo -e " \t no data quitting.\n"
+  else
+    newtag="Y" # -a for Year NUM
+    echo -e "${blue}set_year \"$newtag\" \"$newdata\""
+    are_we_committing
+    if [[ -z "$newtag" ]]; then
+      echo -e "${red}no tag set."
+    elif [[ -z "$newdata" ]]; then
+      echo -e "${red}no data to set."
+    elif [ "$committing" = 'yes' ]; then
+      for f in *.mp3; do
+        # ftb="$(basename "${f%.mp3}")"
+        set_tag_data
+      done
+    else
+      echo -e "${blue}ok... we do nothing then...bailing${reset}"
+    fi
+  fi
+} # set_year
+
+set_track_from_1st_field() {
+  echo -e "${yellow}set track tag -n Num values using filename's 1st field."
+  f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
+  echo -e "${blue}example file is \"$f\" ${reset}"
+  eyeD3 "$f" # let's see the track details
+  newtag="n" # -n for track Num
+  echo -e "newtag is \"$newtag\" for track Num "
+  echo -e "I'm thinking that..."
+  ftb="$(basename "${f%.mp3}")"
+  newdata="$(echo "$ftb" | awk '{print $1}')"
+  echo -e "${blue}track is: $newdata"
+
+  are_we_committing
+  for f in *.mp3; do
+    # SPECIFY TAG DATA HERE
+    ftb="$(basename "${f%.mp3}")"
+    newdata="$(echo "$ftb" | awk '{print $1}')"
+
+    if [[ -z "$newtag" ]]; then
+      echo -e "${red}no tag set."
+    elif [[ -z "$newdata" ]]; then
+      echo -e "${red}no data to set."
+    else
+      set_tag_data
+    fi
+  done
+} # set_track_from_1st_field
+set_artist_title_from_filename() {
+  # sat
+  echo -e "${yellow}set tags artist & title using filename's 1st & 2nd field.${reset}"
+  echo -e "${blue}If our file is called \"artist - title\" we can scrap into tags ${reset} "
+  f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
+  echo -e "file is \"$f\""
+  eyeD3 "$f" # let's see the track details
+  echo -e "I'm thinking that..."
+  ftb="$(basename "${f%.mp3}")"
+  newdata="$(echo "$ftb" | sed 's/ - .*$//')"
+  echo -e "${blue}artist is: $newdata"
+  newdata="$(echo "$ftb" | sed 's/^.* - //')"
+  echo -e "title is: $newdata ${reset}"
+
+  are_we_committing
+
+  for f in *.mp3; do
+    # SPECIFY TAG DATA HERE
+    newtag="a" # -a for artist
+    ftb="$(basename "${f%.mp3}")"
+    newdata="$(echo "$ftb" | sed 's/ - .*$//')"
+    set_tag_data
+
+    newtag="t" # -t for title
+    newdata="$(echo "$ftb" | sed 's/^.* - //')"
+    set_tag_data
+  done
+} # set_artist_title_from_filename
+
+set_artist_title_from_filename_2() {
+  # sat
+  echo -e "${yellow}set tags artist & title using filename's 2nd & 3rd field.${reset}"
+  echo -e "${blue}If our file is called \"num - artist - title\" we can scrap into tags ${reset} "
+  f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
+  echo -e "file is \"$f\""
+  eyeD3 "$f" # let's see the track details
+  echo -e "I'm thinking that..."
+  ftb="$(basename "${f%.mp3}")"
+  newdata="$(echo "$ftb" | sed 's/^[^-]*- \(.*\) - .*$/\1/')"
+  echo -e "${blue}artist is: $newdata"
+  newdata="$(echo "$ftb" | sed 's/^.*- //')"
+  echo -e "title is: $newdata ${reset}"
+
+  are_we_committing
+  if [[ "$committing" = 'yes' ]]; then
+    for f in *.mp3; do
+      # SPECIFY TAG DATA HERE
+      newtag="a" # -a for artist
+      ftb="$(basename "${f%.mp3}")"
+      newdata="$(echo "$ftb" | sed 's/^[^-]*- \(.*\) - .*$/\1/')"
+      set_tag_data
+
+      newtag="t" # -t for title
+      newdata="$(echo "$ftb" | sed 's/^.* - //')"
+      set_tag_data
+    done
+  fi
+} # set_artist_title_from_filename_2
+
+set_title_from_filename() {
+  echo -e "${yellow}set title tag using filename, stripping the \" - \" seperator ${reset}"
+  echo -e "${blue}doing this so that Audiobooks in an mp3 player"
+  echo -e "show track number first to more easily see where you are up to, eg. \"01 myBook\""
+  f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
+  echo -e "example file is \"$f\""
+  eyeD3 "$f" # let's see the track details
+  ftb="$(basename "${f%.mp3}")"
+  newdata="$(echo "$ftb" | sed 's/ - / /')"
+  echo -e "set title to \"$newdata\" "
+
+  are_we_committing
+  if [[ "$committing" = 'yes' ]]; then
+    for f in *.mp3; do
+      # SPECIFY TAG DATA HERE
+      newtag="t" # -n for track Num
+      ftb="$(basename "${f%.mp3}")"
+      newdata="$(echo "$ftb" | sed 's/ - / /')"
+      set_tag_data
+    done
+  else
+    echo -e "bailing then.."
+  fi
+} # set_title_from_filename
+
+set_title_from_filename_2() {
+  echo -e "${yellow}set title tag using filename, stripping the \" - \" seperator ${reset}"
+  echo -e "${blue}doing this so that Audiobooks in an mp3 player"
+  echo -e "show track number first to more easily see where you are up to, eg. \"01 myBook\""
+  f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
+  echo -e "example file is \"$f\""
+  eyeD3 "$f" # let's see the track details
+  ftb="$(basename "${f%.mp3}")"
+  #newdata="$(echo "$ftb" | sed 's/ - / /')"
+  newdata="$(echo "$ftb" | sed 's/^.*- //')"
+  echo -e "set title to \"$newdata\" "
+
+  are_we_committing
+  if [[ "$committing" = 'yes' ]]; then
+    for f in *.mp3; do
+      # SPECIFY TAG DATA HERE
+      newtag="t" # -n for track Num
+      ftb="$(basename "${f%.mp3}")"
+      #    newdata="$(echo "$ftb" | sed 's/ - / /')"
+      newdata="$(echo "$ftb" | sed 's/^.*- //')"
+      set_tag_data
+    done
+  else
+    echo -e "bailing then.."
+  fi
+} # set_title_from_filename_2
+
+set_tag_data() {
+  echo -e "\n${blue}set_tag_data: \"$f\"${reset}"
+  if [[ -z "$newdata" || -z "$newtag" ]]; then
+    #statements
+    echo -e "${red}\tMissing data, cannot commit${reset}"
+  else
+    #    echo -en "${blue}\tWe have data to commit, ${reset}"
+    if [[ "$committing" = 'yes' ]]; then
+      # echo -e "eyeD3 -$newtag \"$newdata\" \"$f\""
+      eyeD3 -l error -$newtag "$newdata" "$f"
+      if [[ $? = 0 ]]; then
+        echo -e "${white}Success ${reset}"
+      fi
+    fi
+  fi
+} # set_tag_data
+
+print_help() {
+  echo -e "eyeD3 -tag \"data\" \"filename\""
+  echo -e "-t is title STRING "
+  echo -e "-n is track NUM "
+  echo -e "-a is the artist STRING "
+  echo -e "-A is the Album STRING "
+  echo -e "-g is Genre"
+  echo -e "-G ? GENRE Speech Comedy"
+  echo -e "-Y Year"
+  echo -e "for f in *.mp3; do eyeD3 --remove-v2  "$f"; done"
+  echo -e "--remove-object DESCRIPTION"
+  echo -e "eyeD3 --write-images . $f"
+  echo "eyeD3 --remove-image '\"Cover (front)\"' \"001 - The Difference Engine.mp3\""
+  echo "for f in *.mp3; do eyeD3 -2 "$f" 2>&1; done"
+  echo
+}
+
+list_mp3s() {
+  echo -e "${yellow}Listing mp3s in current directory"
+  echo -e "${blue}$PWD${yellow}"
+  ls *.mp3
+  echo -e "${reset}"
+}
+
+ren_with_track_n_title_tags() {
+  echo -e "\t${yellow}rename file using \"track - title\"${reset}"
+  echo -e "fields \"As is\" or padded to 2 or 3 spaces?"
+  echo -e -n "[${white}2${reset}] digit padding,[${white}3${reset}] digit padding, "
+  echo -e "[${white}A${reset}]s is, [${white}Enter${reset}] to Quit"
+  read -e -p " > " userentry
+  echo -e ${reset}
+  if [ -z "$userentry" ]; then
+    echo -e "           ...nothing so we are quitting.\n"
+    continue="no"
+  elif [ "$userentry" = 'a' ]; then
+    # As is
+    for f in *.mp3; do
+      track_num="$(eyeD3 -l error "$f" | awk '/track/ {print $2}')"
+      title="$(eyeD3 -l error "$f" | awk '/title/ {print $0}' | sed 's/title\: //')"
+      new_filename="$track_num - $title.mp3"
+
+      if [ "$f" != "$new_filename" ]; then
+        echo -e "file rename with track:num - title"
+        echo -e "mv \"$f\" \"$new_filename\" "
+        mv "$f" "$new_filename"
+      else
+        echo -e "Skipping $f - already has correct name"
+      fi
+    done
+
+  elif [ "$userentry" = '2' ]; then
+    # PAD TO TWO DIGITS
+    echo -e "file rename with track:num padded 2 - title"
+    f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
+    newtrackname="$(eyeD3 -l error "$f" | awk '/track/ {print $2}' | sed 's/\b[0-9]\b/0&/g')" # pad track number 2 spaces
+    newtrackname="$newtrackname - $(eyeD3 -l error "$f" | awk '/title/ {print $0}' | sed 's/title\: //').mp3"
+    echo -e "${blue}newtrackname \"$newtrackname\"${reset}"
+    are_we_committing
+    if [[ "$committing" = 'yes' ]]; then
+      for f in *.mp3; do
+        newtrackname="$(eyeD3 -l error "$f" | awk '/track/ {print $2}' | sed 's/\b[0-9]\b/0&/g')" # pad track number 2 spaces
+        newtrackname="$newtrackname - $(eyeD3 -l error "$f" | awk '/title/ {print $0}' | sed 's/title\: //').mp3"
+
+        if [[ "$f" != "$newtrackname" ]]; then
+          mv "$f" "$newtrackname"
+          if [[ $? = 0 ]]; then
+            echo -en "${white}Success: ${reset}"
+            echo -e "mv to \"$newtrackname\" "
+            echo -e "${blue}\"$f\"${reset}"
+          fi
+        else
+          echo -e "${yellow}Skipping:${reset} \"$f\" already has correct name"
+        fi
+      done
+    fi
+
+  elif [ "$userentry" = '3' ]; then
+    # PAD TO THREE DIGITS
+    echo -e "file rename with track:num padded 3 - title"
+    f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
+    newtrackname="$(eyeD3 -l error "$f" | awk '/track/ {print $2}' | sed 's/\b[0-9]\b/00&/g; s/\b[0-9]\{2\}\b/0&/g')" # pad track number 3 spaces
+    newtrackname="$newtrackname - $(eyeD3 -l error "$f" | awk '/title/ {print $0}' | sed 's/title\: //').mp3"
+    echo -e "${blue}newtrackname \"$newtrackname\"${reset}"
+    are_we_committing
+    if [[ "$committing" = 'yes' ]]; then
+      for f in *.mp3; do
+        newtrackname="$(eyeD3 -l error "$f" | awk '/track/ {print $2}' | sed 's/\b[0-9]\b/00&/g; s/\b[0-9]\{2\}\b/0&/g')" # pad track number 3 spaces
+        newtrackname="$newtrackname - $(eyeD3 -l error "$f" | awk '/title/ {print $0}' | sed 's/title\: //').mp3"
+        mv "$f" "$newtrackname"
+        if [[ $? = 0 ]]; then
+          echo -en "${white}Success: ${reset}"
+          echo -e "mv to \"$newtrackname\" "
+          echo -e "${blue}\"$f\"${reset}"
+        fi
+      done
+    fi
+  elif [ -z "$userentry" ]; then
+    echo -e "bailing"
+  fi
+} # ren_with_track_n_title_tags
+
+ren_artist_title_from_tags() {
+  echo -e "${blue}rename file with \"artist - title\"${reset}"
+  echo -e "\t${yellow}eg. track details${reset}"
+  f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
+  new_filename="$(eyeD3 -l error "$f" | awk '/^artist/ {print $0}' | sed 's/^artist: //')"
+  new_filename="$new_filename - $(eyeD3 -l error "$f" | awk '/^title/ {print $0}' | sed 's/^title: //').mp3"
+  echo -e "${blue}mv \"$f\" ${yellow}\"$new_filename\" ${reset}"
+
+  are_we_committing
+  if [ "$committing" = 'yes' ]; then
+    for f in *.mp3; do
+      # echo "$f"
+      new_filename="$(eyeD3 -l error "$f" | awk '/^artist/ {print $0}' | sed 's/^artist: //')"
+      new_filename="$new_filename - $(eyeD3 -l error "$f" | awk '/^title/ {print $0}' | sed 's/^title: //').mp3"
+      echo -e "${blue}mv \"$f\" ${yellow}\"$new_filename\" ${reset}"
+      mv "$f" "$new_filename"
+    done
+  else
+    echo -e "bailing then..\n"
+  fi
+} # ren_artist_title_from_tags
+
+ren_title_artist() {
+  echo -e "rename file with \"title -artist\""
+  for f in *.mp3; do
+    # echo "$f"
+    new_filename="$(eyeD3 -l error "$f" | awk '/^title/ {print $0}' | sed 's/^title: //').mp3"
+    new_filename="$new_filename - $(eyeD3 -l error "$f" | awk '/artist/ {print $0}' | sed 's/^artist: //')"
+    echo -e "mv \"$f\" \"$new_filename\" "
+    mv "$f" "$new_filename"
+  done
+} # ren_title_artist
+
+ren_title_only_from_tags() {
+  echo -e "${blue}set the filename to ${yellow}\"title\"${blue} only"
+  echo -e "\t${yellow}eg. track details${reset}"
+  f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
+  new_filename="$(eyeD3 -l error "$f" | awk '/title/ {print $0}' | sed 's/^title\: //').mp3"
+  echo -e "${blue}mv \"$f\" ${yellow}\"$new_filename\" ${reset}"
+  echo -e "continue? ${yellow}[y]"
+  read -e -p " " userentry
+  echo -e ${reset}
+  if [ "$userentry" = "y" ]; then
+    for f in *.mp3; do
+      new_filename="$(eyeD3 -l error "$f" | awk '/title/ {print $0}' | sed 's/^title\: //').mp3"
+      echo -e "${blue}mv \"$f\" ${yellow}\"$new_filename\" ${reset}"
+      mv "$f" "$new_filename"
+      # echo -e "flip around newtrackname \"$newtrackname\""
+    done
+  else
+    echo -e "           ...nothing so we are quitting.\n"
+  fi
+} # ren_title_only_from_tags
+
+tr_details() {
+  echo -e "\t${yellow}track details of an mp3 in pwd${reset}"
+  f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
+  eyeD3 -l error "$f"
+  echo -e "${reset}"
+
+  echo -en "${blue}Looking for tag data track/number"
+  mp3track="$(eyeD3 -l error "$f" | awk '/track/ {print $2}' | sed 's/\b[0-9]\b/0&/g')" # pad track number 2 spaces
+  if [[ -z $mp3track ]]; then
+    echo -e "${yellow}, no data found.${reset}"
+  else
+    echo -e ", ${yellow}\"$mp3track\"${reset}"
+    # echo -e "(rename) mv \"$f\" \"$mp3track\"\n"
+  fi
+
+  echo -en "${blue}Looking for tag data title"
+  mp3title="$(eyeD3 -l error "$f" | awk '/title/ {print $0}' | sed 's/^title\: //')"
+  if [[ -z $mp3title ]]; then
+    echo -e "${yellow}, no data found.${reset}"
+  else
+    echo -e ", ${yellow}\"$mp3title\"${reset}"
+  fi
+  echo
+  pause
+}
+
+tag_insert_num_track() {
+  echo -e "${blue}set tag -n (tracknum) from 1st field${reset}"
+
+  for f in *.mp3; do
+    ftb="$(basename "${f%.mp3}")"
+    echo -e "${blue}ftb ${yellow}\"$ftb\"${reset}"
+
+    mp3track="$(echo "$ftb" | awk '{print $1}')"
+    echo -e "${blue}mp3track ${yellow}$mp3track${reset}"
+    newtag="n" # -n for track NUM
+    newdata="$mp3track"
+    echo "set_tag_data \"$newtag\" \"$newdata\""
+
+    mp3title="$(echo "$ftb" | awk '{print $3}')"
+    echo -e "${blue}mp3title ${yellow}$mp3title${reset}"
+    newtag="t" # -t for track TITLE
+    newdata="$mp3title"
+    echo "set_tag_data \"$newtag\" \"$newdata\""
+  done
+}
+
+add_album_art_to_all() {
+  # https://stackoverflow.com/questions/24195874/best-way-to-find-files-recursively-that-have-the-same-name-but-are-actually-diff/24197175#24197175
+
+  f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
+  eyeD3 -l error "$f"
+
+  echo -e "adding album art to all files in this folder"
+  echo -e "need path to file and type eg, FRONT_COVER"
+  #
+  # Select image to use
+  #
+  images=(*.{gif,jpeg,jpg,png})
+  if [[ ${#images[@]} -eq 0 ]]; then
+    echo -e "no images found"
+    exit
+  elif [[ ${#images[@]} -eq 1 ]]; then
+    echo -e "We only have ${white}one media to use...${reset}"
+    echo -e "${blue}$images${reset}"
+    album_art=$images
+  elif [[ ${#images[@]} -gt 1 ]]; then
+    echo -e "There are ${white}${#images[@]} possibles${reset} to choose from"
+    # select descriptor in $(mount | awk '/media/{print $3}')
+    select album_art in "${images[@]}"; do
+      echo -e "${blue}chosen \"$album_art\" ${reset}"
+      break
+    done
+  else
+    echo "Don't know what we've found ${white} bailing out! ${reset}"
+  fi
+  #
+  # Select type - Front or Back cover
+  #
+  echo -e "select type"
+  imagetypes=("FRONT_COVER" "BACK_COVER")
+  select arttype in "${imagetypes[@]}"; do
+    echo -e "${blue}\"$arttype\"${reset}"
+    break
+  done
+  echo -e "${blue} --add-image \"$album_art:$arttype\"${reset}"
+
+  are_we_committing
+  if [[ "$committing" = "yes" ]]; then
+    find . -maxdepth 1 -type f -name "*\.mp3" -print0 | while IFS= read -r -d '' file; do
+      echo -e "\t${blue}$file${reset}"
+      if ! eyeD3 -2 "$file" 2>&1 | grep -q "No ID3 v2.x tag"; then
+        #statements
+        echo -e "adding image"
+        eyeD3 -l error "$file" --add-image "$album_art:$arttype"
+        if [[ $? = 0 ]]; then
+          echo -en "${white}Success: ${reset}"
+          echo -e "${blue}\"$file\"${reset}"
+        fi
+
+      else
+        echo -e "\t${blue}ID3 v2.x ${white}Not Found${reset}"
+      fi
+    done
+  else
+    echo -e "${red}not committed, bailing.\n ${reset}"
+    # echo -e "eyeD3  \"$file\"  --add-image \"$album_art:$arttype\""
+  fi
+} # add_album_art_to_all
+
+ext_album_art() {
+  f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
+  echo -e "${blue}Using $f ...${reset}"
+  eyeD3 -l error --write-images . "$f"
+} # ext_album_art
+
+flipAround() {
+  echo -e "${yellow}\tFlipAround${reset} "
+  f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
+  ftb="$(basename "${f%.mp3}")"
+  newdata="$(echo $ftb | sed -E 's/(.*\b)\s?-\s?(\b.*)/\2 - \1/').mp3"
+  echo -e "current: $f"
+  echo -e "suggest:${yellow} \"$newdata\" ${reset}"
+  are_we_committing
+  if [[ "$committing" = "yes" ]]; then
+    for f in *.mp3; do
+      ftb="$(basename "${f%.mp3}")"
+      newdata="$(echo $ftb | sed -E 's/(.*\b)\s?-\s?(\b.*)/\2 - \1/').mp3"
+      mv "$f" "$newdata"
+      if [[ $? = 0 ]]; then
+        echo -en "${white}Success: ${reset}"
+        echo -e "${blue}mv \"$f\" ${yellow}\"$newdata\" ${reset}"
+      fi
+    done
+  else
+    echo -e "${red}not committing, bailing${reset}"
+  fi
+} # flipAround
+
+are_we_committing() {
+  echo -en "${yellow}are_we_committing ?"
+  read -e -p " [y] " userentry
+  echo -e "${reset}"
+  if [ "$userentry" = 'y' ]; then
+    committing="yes"
+  else
+    committing="no"
+  fi
+}
+
+# MAIN STARTS HERE
+echo -e "\t${yellow}$(basename $0)${reset}"
+echo -e "\t${blue}mp3 set name / tags${reset}"
+
+# get a file for sample data
+# onemp3file=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
+#
+# menu_head #####
+#
+continue='yes'
+until [ "$continue" = 'no' ]; do
+  # echo -e "${yellow}Menu - what we might do${reset}"
+  # possibilities
+  echo -e "${reset}[${white}l${reset}]ist MP3s in cwd${reset}"
+  echo -e "${reset}[${white}d${reset}]etails of one track${reset}"
+  echo -e "${reset}[${white}gl${reset}] genre list${reset}"
+  echo -e "${reset}[${white}g${reset}] set genre, user entry${reset}"
+  echo -e "${reset}[${white}h${reset}]elp${reset}"
+
+  echo -e "\t${yellow}Set Tags${reset}"
+
+  echo -e "[${white}ct${reset}] Check ID3 tags exist"
+  echo -e "[${white}ec${reset}] Erase Comments"
+  echo -e "[${white}rt${reset}] Remove All Tags"
+  echo -e "[${white}rf${reset}] Remove Frame"
+  echo -e "[${white}r1${reset}] Remove v1 tags"
+  echo -e "[${white}23${reset}] Convert tags to v2.3"
+  echo -e "[${white}a${reset}]rtist - bulk reset, user entry"
+  echo -e "[${white}A${reset}]lbum - bulk reset, user entry"
+  echo -e "[${white}Y${reset}]ear - bulk reset, user entry"
+  echo -en "[${white}n${reset}]"
+  echo "um - set track number from filename 1st field \"NUM - str\" "
+  echo -e "[${white}sat${reset}] set \"artist title\" from 1st & 2nd fields "
+  echo -e "[${white}sat2${reset}] set \"artist title\" tags \"str - str\" from filename \"2nd - 3rd fields\" "
+  echo -e "[${white}art${reset}] set album art for all files in folder "
+  echo -e "[${white}ext${reset}]tract (write) album art from a file in folder "
+  echo -e "[${white}st${reset}] set title tag \"num str\" from filename \"num - str\" "
+  echo -e "[${white}st2${reset}] set title tag \"str\" from filename \"2nd field\" "
+  #
+  # renaming the file
+  #
+  echo -e "\t${yellow}Set filename${reset} from tags ${reset}"
+  echo -e "[${white}nt${reset}] \"num - title\" (padding the number)${reset}"
+  echo -e "[${white}at${reset}] \"${reset}artist - title\"${reset}"
+  echo -e "[${white}ta${reset}] \"${reset}title - artist\"${reset}"
+  echo -e "[${white}to${reset}] \"title \"(only)${reset}"
+  echo -en "\n[${white}f${reset}]lip filename field 1 <> field 2"
+
+  echo -e -n "\n${reset}[${white}Enter${reset}] ${yellow}Quit${reset}"
+  read -e -p " > " userentry
+  echo -e ${reset}
+
+  if [ -z "$userentry" ]; then
+    echo -e " \tquitting.\n"
+    continue="no"
+  elif [ "$userentry" = 'l' ]; then
+    list_mp3s
+  elif [ "$userentry" = 'ph' ]; then
+    print_help
+
+    # Tags
+
+  elif [ "$userentry" = 'ct' ]; then
+    check_tag_version
+  elif [ "$userentry" = 'ec' ]; then
+    rem_all_comments
+    # continue="yes"
+  elif [ "$userentry" = 'rf' ]; then
+    rem_frame
+    # continue="yes"
+  elif [ "$userentry" = 'r1' ]; then
+    rem_v1
+    # continue="yes"
+    # continue="yes"
+  elif [ "$userentry" = 'rt' ]; then
+    remove_all_tags
+    # continue="yes"
+    # continue="yes"
+  elif [ "$userentry" = '23' ]; then
+    convert_to_v23
+    # continue="yes"
+  elif [ "$userentry" = 'd' ]; then
+    tr_details
+    continue="yes"
+  elif [ "$userentry" = 'gl' ]; then
+    list_genres
+    continue="yes"
+  elif [ "$userentry" = 'g' ]; then
+    set_genre
+    continue="yes"
+  elif [ "$userentry" = 'h' ]; then
+    print_help
+    continue="yes"
+  elif [ "$userentry" = 'a' ]; then
+    set_artist
+    # continue="yes"
+  elif [ "$userentry" = 'A' ]; then
+    set_album
+    # continue="yes"
+  elif [ "$userentry" = 'Y' ]; then
+    set_year
+    # continue="yes"
+  elif [ "$userentry" = 'n' ]; then
+    set_track_from_1st_field
+    # continue="yes"
+  elif [ "$userentry" = 'sat' ]; then
+    set_artist_title_from_filename
+    continue="no"
+  elif [ "$userentry" = 'st' ]; then
+    set_title_from_filename
+    continue="no"
+  elif [ "$userentry" = 'sat2' ]; then
+    set_artist_title_from_filename_2
+    continue="no"
+
+  elif [ "$userentry" = 'st2' ]; then
+    set_title_from_filename_2
+    continue="no"
+
+    # rename file
+
+  elif [ "$userentry" = 'nt' ]; then
+    ren_with_track_n_title_tags
+    continue="no"
+  elif [ "$userentry" = 'at' ]; then
+    ren_artist_title_from_tags
+    continue="no"
+  elif [ "$userentry" = 'to' ]; then
+    ren_title_only_from_tags
+    continue="no"
+  elif [ "$userentry" = 'art' ]; then
+    add_album_art_to_all
+    continue="no"
+  elif [ "$userentry" = 'ext' ]; then
+    ext_album_art
+    continue="yes"
+  elif [ "$userentry" = 'f' ]; then
+    flipAround
+    continue="no"
+
+  elif [ "$userentry" = 's' ]; then
+    custom_special
+    continue="no"
+  fi
+done                                              # continue
+echo -e "\nEOF ${yellow}$(basename $0)${reset}\n" # MAIN ENDS HERE
