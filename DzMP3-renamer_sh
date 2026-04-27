@@ -453,6 +453,7 @@ set_title_from_filename_2() {
 } # set_title_from_filename_2
 
 set_tag_data() {
+  newdata="$(echo "$newdata" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
   echo -e "\n${blue}set_tag_data: \"$f\"${reset}"
   if [[ -z "$newdata" || -z "$newtag" ]]; then
     #statements
@@ -506,8 +507,8 @@ ren_with_track_n_title_tags() {
   elif [ "$userentry" = 'a' ]; then
     # As is
     for f in *.mp3; do
-      track_num="$(eyeD3 -l error "$f" | awk '/track/ {print $2}')"
-      title="$(eyeD3 -l error "$f" | awk '/title/ {print $0}' | sed 's/title\: //')"
+      track_num="$(eyeD3 -l error "$f" | awk '/track/ {print $2}' | sed 's/[[:space:]]*$//')"
+      title="$(eyeD3 -l error "$f" | awk '/^title:/ {print $0}' | sed 's/title\: //;s/[[:space:]]*$//')"
       new_filename="$track_num - $title.mp3"
 
       if [ "$f" != "$new_filename" ]; then
@@ -523,14 +524,14 @@ ren_with_track_n_title_tags() {
     # PAD TO TWO DIGITS
     echo -e "file rename with track:num padded 2 - title"
     f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
-    newtrackname="$(eyeD3 -l error "$f" | awk '/track/ {print $2}' | sed 's/\b[0-9]\b/0&/g')" # pad track number 2 spaces
-    newtrackname="$newtrackname - $(eyeD3 -l error "$f" | awk '/title/ {print $0}' | sed 's/title\: //').mp3"
+    newtrackname="$(eyeD3 -l error "$f" | awk '/track/ {print $2}' | sed 's/\b[0-9]\b/0&/g;s/[[:space:]]*$//')" # pad track number 2 spaces
+    newtrackname="$newtrackname - $(eyeD3 -l error "$f" | awk '/^title:/ {print $0}' | sed 's/title\: //;s/[[:space:]]*$//').mp3"
     echo -e "${blue}newtrackname \"$newtrackname\"${reset}"
     are_we_committing
     if [[ "$committing" = 'yes' ]]; then
       for f in *.mp3; do
-        newtrackname="$(eyeD3 -l error "$f" | awk '/track/ {print $2}' | sed 's/\b[0-9]\b/0&/g')" # pad track number 2 spaces
-        newtrackname="$newtrackname - $(eyeD3 -l error "$f" | awk '/title/ {print $0}' | sed 's/title\: //').mp3"
+        newtrackname="$(eyeD3 -l error "$f" | awk '/track/ {print $2}' | sed 's/\b[0-9]\b/0&/g;s/[[:space:]]*$//')" # pad track number 2 spaces
+        newtrackname="$newtrackname - $(eyeD3 -l error "$f" | awk '/^title:/ {print $0}' | sed 's/title\: //;s/[[:space:]]*$//').mp3"
 
         if [[ "$f" != "$newtrackname" ]]; then
           mv "$f" "$newtrackname"
@@ -549,14 +550,14 @@ ren_with_track_n_title_tags() {
     # PAD TO THREE DIGITS
     echo -e "file rename with track:num padded 3 - title"
     f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
-    newtrackname="$(eyeD3 -l error "$f" | awk '/track/ {print $2}' | sed 's/\b[0-9]\b/00&/g; s/\b[0-9]\{2\}\b/0&/g')" # pad track number 3 spaces
-    newtrackname="$newtrackname - $(eyeD3 -l error "$f" | awk '/title/ {print $0}' | sed 's/title\: //').mp3"
+    newtrackname="$(eyeD3 -l error "$f" | awk '/track/ {print $2}' | sed 's/\b[0-9]\b/00&/g; s/\b[0-9]\{2\}\b/0&/g;s/[[:space:]]*$//')" # pad track number 3 spaces
+    newtrackname="$newtrackname - $(eyeD3 -l error "$f" | awk '/^title:/ {print $0}' | sed 's/title\: //;s/[[:space:]]*$//').mp3"
     echo -e "${blue}newtrackname \"$newtrackname\"${reset}"
     are_we_committing
     if [[ "$committing" = 'yes' ]]; then
       for f in *.mp3; do
-        newtrackname="$(eyeD3 -l error "$f" | awk '/track/ {print $2}' | sed 's/\b[0-9]\b/00&/g; s/\b[0-9]\{2\}\b/0&/g')" # pad track number 3 spaces
-        newtrackname="$newtrackname - $(eyeD3 -l error "$f" | awk '/title/ {print $0}' | sed 's/title\: //').mp3"
+        newtrackname="$(eyeD3 -l error "$f" | awk '/track/ {print $2}' | sed 's/\b[0-9]\b/00&/g; s/\b[0-9]\{2\}\b/0&/g;s/[[:space:]]*$//')" # pad track number 3 spaces
+        newtrackname="$newtrackname - $(eyeD3 -l error "$f" | awk '/^title:/ {print $0}' | sed 's/title\: //;s/[[:space:]]*$//').mp3"
         mv "$f" "$newtrackname"
         if [[ $? = 0 ]]; then
           echo -en "${white}Success: ${reset}"
@@ -574,16 +575,16 @@ ren_artist_title_from_tags() {
   echo -e "${blue}rename file with \"artist - title\"${reset}"
   echo -e "\t${yellow}eg. track details${reset}"
   f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
-  new_filename="$(eyeD3 -l error "$f" | awk '/^artist/ {print $0}' | sed 's/^artist: //')"
-  new_filename="$new_filename - $(eyeD3 -l error "$f" | awk '/^title/ {print $0}' | sed 's/^title: //').mp3"
+  new_filename="$(eyeD3 -l error "$f" | awk '/^artist/ {print $0}' | sed 's/^artist: //;s/[[:space:]]*$//')"
+  new_filename="$new_filename - $(eyeD3 -l error "$f" | awk '/^title/ {print $0}' | sed 's/^title: //;s/[[:space:]]*$//').mp3"
   echo -e "${blue}mv \"$f\" ${yellow}\"$new_filename\" ${reset}"
 
   are_we_committing
   if [ "$committing" = 'yes' ]; then
     for f in *.mp3; do
       # echo "$f"
-      new_filename="$(eyeD3 -l error "$f" | awk '/^artist/ {print $0}' | sed 's/^artist: //')"
-      new_filename="$new_filename - $(eyeD3 -l error "$f" | awk '/^title/ {print $0}' | sed 's/^title: //').mp3"
+      new_filename="$(eyeD3 -l error "$f" | awk '/^artist/ {print $0}' | sed 's/^artist: //;s/[[:space:]]*$//')"
+      new_filename="$new_filename - $(eyeD3 -l error "$f" | awk '/^title/ {print $0}' | sed 's/^title: //;s/[[:space:]]*$//').mp3"
       echo -e "${blue}mv \"$f\" ${yellow}\"$new_filename\" ${reset}"
       mv "$f" "$new_filename"
     done
@@ -596,8 +597,8 @@ ren_title_artist() {
   echo -e "rename file with \"title -artist\""
   for f in *.mp3; do
     # echo "$f"
-    new_filename="$(eyeD3 -l error "$f" | awk '/^title/ {print $0}' | sed 's/^title: //').mp3"
-    new_filename="$new_filename - $(eyeD3 -l error "$f" | awk '/artist/ {print $0}' | sed 's/^artist: //')"
+    new_filename="$(eyeD3 -l error "$f" | awk '/^title/ {print $0}' | sed 's/^title: //;s/[[:space:]]*$//').mp3"
+    new_filename="$new_filename - $(eyeD3 -l error "$f" | awk '/artist/ {print $0}' | sed 's/^artist: //;s/[[:space:]]*$//')"
     echo -e "mv \"$f\" \"$new_filename\" "
     mv "$f" "$new_filename"
   done
@@ -607,14 +608,14 @@ ren_title_only_from_tags() {
   echo -e "${blue}set the filename to ${yellow}\"title\"${blue} only"
   echo -e "\t${yellow}eg. track details${reset}"
   f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
-  new_filename="$(eyeD3 -l error "$f" | awk '/title/ {print $0}' | sed 's/^title\: //').mp3"
+  new_filename="$(eyeD3 -l error "$f" | awk '/^title:/ {print $0}' | sed 's/^title\: //;s/[[:space:]]*$//').mp3"
   echo -e "${blue}mv \"$f\" ${yellow}\"$new_filename\" ${reset}"
   echo -e "continue? ${yellow}[y]"
   read -e -p " " userentry
   echo -e ${reset}
   if [ "$userentry" = "y" ]; then
     for f in *.mp3; do
-      new_filename="$(eyeD3 -l error "$f" | awk '/title/ {print $0}' | sed 's/^title\: //').mp3"
+      new_filename="$(eyeD3 -l error "$f" | awk '/^title:/ {print $0}' | sed 's/^title\: //;s/[[:space:]]*$//').mp3"
       echo -e "${blue}mv \"$f\" ${yellow}\"$new_filename\" ${reset}"
       mv "$f" "$new_filename"
       # echo -e "flip around newtrackname \"$newtrackname\""
@@ -640,7 +641,7 @@ tr_details() {
   fi
 
   echo -en "${blue}Looking for tag data title"
-  mp3title="$(eyeD3 -l error "$f" | awk '/title/ {print $0}' | sed 's/^title\: //')"
+  mp3title="$(eyeD3 -l error "$f" | awk '/^title:/ {print $0}' | sed 's/^title\: //')"
   if [[ -z $mp3title ]]; then
     echo -e "${yellow}, no data found.${reset}"
   else
