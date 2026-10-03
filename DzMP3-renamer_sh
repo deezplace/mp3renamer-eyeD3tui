@@ -27,20 +27,21 @@ pause() {
   read userentry
 }
 rem_all_comments() {
-  echo -e "removing all comments"
-  are_we_committing
+  option="--remove-all-comments"
+  echo -e "${yellow}\tremove all comments${reset}"
 
+  echo -e "${blue}eyeD3 $option"
+  echo -e "${yellow} about to modify all mp3s in PWD"
+  are_we_committing
   if [ "$committing" = 'yes' ]; then
-    find . -maxdepth 1 -type f -name "*\.mp3" -print0 | while IFS= read -r -d '' file; do
-      echo -e "\t${blue}$file${reset}"
-      if ! eyeD3 -2 "$file" 2>&1 | grep -q "No ID3 v2.x tag"; then
-        echo -e "\t${blue}ID3 v2.x ${white}Found${reset}"
-      else
-        echo -e "\t${blue}ID3 v2.x ${white}Not Found${reset}"
-      fi
+    for f in *.mp3; do
+      eyeD3 -l error $option "$f"
     done
+  else
+    echo -e "${blue}ok... we do nothing then...bailing${reset}"
   fi
-}
+  echo -e ${reset}
+} # rem_all_comments
 
 rem_frame() {
 
@@ -360,7 +361,11 @@ set_artist_title_from_filename() {
   for f in *.mp3; do
     # SPECIFY TAG DATA HERE
     newtag="a" # -a for artist
-    ftb="$(basename "${f%.mp3}")"
+    ftb="$(basename "${f%.*}")"
+    if ! is_artist_title_name "$ftb"; then
+      echo -e "\n${red}Skipping \"$f\" - filename is not \"artist - title\"${reset}"
+      continue
+    fi
     newdata="$(echo "$ftb" | sed 's/ - .*$//')"
     set_tag_data
 
@@ -506,6 +511,15 @@ ren_with_track_n_title_tags() {
     continue="no"
   elif [ "$userentry" = 'a' ]; then
     # As is
+    f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
+    track_num="$(eyeD3 -l error "$f" | awk '/track/ {print $2}' | sed 's/[[:space:]]*$//')"
+    title="$(eyeD3 -l error "$f" | awk '/^title:/ {print $0}' | sed 's/title\: //;s/[[:space:]]*$//')"
+    echo -e "${blue}mv \"$f\" ${yellow}\"$track_num - $title.mp3\"${reset}"
+    are_we_committing
+    if [[ "$committing" != 'yes' ]]; then
+      echo -e "${blue}ok... we do nothing then...bailing${reset}"
+      return
+    fi
     for f in *.mp3; do
       track_num="$(eyeD3 -l error "$f" | awk '/track/ {print $2}' | sed 's/[[:space:]]*$//')"
       title="$(eyeD3 -l error "$f" | awk '/^title:/ {print $0}' | sed 's/title\: //;s/[[:space:]]*$//')"
@@ -594,14 +608,24 @@ ren_artist_title_from_tags() {
 } # ren_artist_title_from_tags
 
 ren_title_artist() {
-  echo -e "rename file with \"title -artist\""
-  for f in *.mp3; do
-    # echo "$f"
-    new_filename="$(eyeD3 -l error "$f" | awk '/^title/ {print $0}' | sed 's/^title: //;s/[[:space:]]*$//').mp3"
-    new_filename="$new_filename - $(eyeD3 -l error "$f" | awk '/artist/ {print $0}' | sed 's/^artist: //;s/[[:space:]]*$//')"
-    echo -e "mv \"$f\" \"$new_filename\" "
-    mv "$f" "$new_filename"
-  done
+  echo -e "${blue}rename file with \"title - artist\"${reset}"
+  echo -e "\t${yellow}eg. track details${reset}"
+  f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
+  new_filename="$(eyeD3 -l error "$f" | awk '/^title/ {print $0}' | sed 's/^title: //;s/[[:space:]]*$//')"
+  new_filename="$new_filename - $(eyeD3 -l error "$f" | awk '/^artist/ {print $0}' | sed 's/^artist: //;s/[[:space:]]*$//').mp3"
+  echo -e "${blue}mv \"$f\" ${yellow}\"$new_filename\" ${reset}"
+
+  are_we_committing
+  if [ "$committing" = 'yes' ]; then
+    for f in *.mp3; do
+      new_filename="$(eyeD3 -l error "$f" | awk '/^title/ {print $0}' | sed 's/^title: //;s/[[:space:]]*$//')"
+      new_filename="$new_filename - $(eyeD3 -l error "$f" | awk '/^artist/ {print $0}' | sed 's/^artist: //;s/[[:space:]]*$//').mp3"
+      echo -e "${blue}mv \"$f\" ${yellow}\"$new_filename\" ${reset}"
+      mv "$f" "$new_filename"
+    done
+  else
+    echo -e "bailing then..\n"
+  fi
 } # ren_title_artist
 
 ren_title_only_from_tags() {
@@ -610,10 +634,8 @@ ren_title_only_from_tags() {
   f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
   new_filename="$(eyeD3 -l error "$f" | awk '/^title:/ {print $0}' | sed 's/^title\: //;s/[[:space:]]*$//').mp3"
   echo -e "${blue}mv \"$f\" ${yellow}\"$new_filename\" ${reset}"
-  echo -e "continue? ${yellow}[y]"
-  read -e -p " " userentry
-  echo -e ${reset}
-  if [ "$userentry" = "y" ]; then
+  are_we_committing
+  if [ "$committing" = 'yes' ]; then
     for f in *.mp3; do
       new_filename="$(eyeD3 -l error "$f" | awk '/^title:/ {print $0}' | sed 's/^title\: //;s/[[:space:]]*$//').mp3"
       echo -e "${blue}mv \"$f\" ${yellow}\"$new_filename\" ${reset}"
@@ -651,27 +673,6 @@ tr_details() {
   pause
 }
 
-tag_insert_num_track() {
-  echo -e "${blue}set tag -n (tracknum) from 1st field${reset}"
-
-  for f in *.mp3; do
-    ftb="$(basename "${f%.mp3}")"
-    echo -e "${blue}ftb ${yellow}\"$ftb\"${reset}"
-
-    mp3track="$(echo "$ftb" | awk '{print $1}')"
-    echo -e "${blue}mp3track ${yellow}$mp3track${reset}"
-    newtag="n" # -n for track NUM
-    newdata="$mp3track"
-    echo "set_tag_data \"$newtag\" \"$newdata\""
-
-    mp3title="$(echo "$ftb" | awk '{print $3}')"
-    echo -e "${blue}mp3title ${yellow}$mp3title${reset}"
-    newtag="t" # -t for track TITLE
-    newdata="$mp3title"
-    echo "set_tag_data \"$newtag\" \"$newdata\""
-  done
-}
-
 add_album_art_to_all() {
   # https://stackoverflow.com/questions/24195874/best-way-to-find-files-recursively-that-have-the-same-name-but-are-actually-diff/24197175#24197175
 
@@ -686,7 +687,7 @@ add_album_art_to_all() {
   images=(*.{gif,jpeg,jpg,png})
   if [[ ${#images[@]} -eq 0 ]]; then
     echo -e "no images found"
-    exit
+    return
   elif [[ ${#images[@]} -eq 1 ]]; then
     echo -e "We only have ${white}one media to use...${reset}"
     echo -e "${blue}$images${reset}"
@@ -764,15 +765,232 @@ flipAround() {
   fi
 } # flipAround
 
+is_artist_title_name() {
+  # true if "$1" is exactly "artist - title": one " - " with text both sides
+  local name="$1" left right
+  [[ "$name" == *" - "* ]] || return 1
+  left="${name%% - *}"
+  right="${name#* - }"
+  [[ -n "$left" && -n "$right" && "$right" != *" - "* ]]
+} # is_artist_title_name
+
+tag_report() {
+  # $1 = problems | full ; compares ID3 v1 and v2 of each mp3 in PWD
+  local mode="$1"
+  local report="tag-report.txt"
+  echo -e "${yellow}\tTag report ($mode)${reset}"
+  python3 - "$mode" <<'PY' | tee "$report"
+import glob, logging, sys
+logging.disable(logging.CRITICAL)
+import eyed3
+from eyed3 import id3
+
+mode = sys.argv[1]
+JUNK = {"major_brand", "minor_version", "compatible_brands"}
+ENC = {0: "latin1", 1: "utf16", 2: "utf16be", 3: "utf8"}
+FIELDS = ["title", "artist", "album", "track", "year", "genre"]
+
+
+def load(path, version):
+    try:
+        af = eyed3.load(path, tag_version=version)
+    except Exception:
+        return None
+    return af.tag if af and af.tag else None
+
+
+def values(tag):
+    if tag is None:
+        return None
+    date = tag.getBestDate()
+    return {
+        "title": tag.title or "",
+        "artist": tag.artist or "",
+        "album": tag.album or "",
+        "track": str(tag.track_num[0] or ""),
+        "year": str(date.year) if date else "",
+        "genre": tag.genre.name if tag.genre and tag.genre.name else "",
+    }
+
+
+def v1_form(field, v2val, v2tag):
+    # what eyeD3 would store in v1 for this v2 value
+    if field in ("title", "artist", "album"):
+        return v2val.encode("latin_1", "replace")[:30].decode("latin_1").strip()
+    if field == "genre":
+        return v2val if v2tag.genre and v2tag.genre.id is not None else "Other"
+    return v2val
+
+
+def status(field, v2val, v1val, v2tag):
+    if v1val is None:
+        return "no v1"
+    if v1val.strip() == v2val.strip():
+        return "ok" if v2val else "-"
+    if v1val.strip() == v1_form(field, v2val, v2tag):
+        return "ok (v1 limit)"
+    return "DIFF"
+
+
+def cut(s, n=30):
+    return s if len(s) <= n else s[: n - 1] + "~"
+
+
+files = sorted(glob.glob("*.[mM][pP]3"))
+if not files:
+    print("no mp3 files in this folder")
+    sys.exit(0)
+
+counts = {}
+problem_files = 0
+for path in files:
+    t2, t1 = load(path, id3.ID3_V2), load(path, id3.ID3_V1)
+    v2, v1 = values(t2), values(t1)
+    issues = []
+    if t2 is None:
+        issues.append(("no v2 tag", "no v2 tag"))
+    else:
+        if t2.version == id3.ID3_V2_4:
+            issues.append(("v2.4 tag", "v2.4 tag - old stereos may need v2.3 (use 23 or car)"))
+        for f in ("title", "artist"):
+            if not v2[f]:
+                issues.append((f"empty v2 {f}", f"v2 {f} is empty"))
+        txxx = {fr.description for fr in t2.frame_set.get(b"TXXX", [])}
+        if txxx & JUNK:
+            issues.append(("junk TXXX", "junk ffmpeg TXXX frames: " + ", ".join(sorted(txxx & JUNK))))
+    if t1 is None:
+        issues.append(("no v1 tag", "no v1 tag"))
+    elif t2 is not None:
+        for f in FIELDS:
+            if status(f, v2[f], v1[f], t2) == "DIFF":
+                issues.append((f"v1 {f} differs", f"v1 {f} differs: v2 '{v2[f]}' / v1 '{v1[f]}'"))
+
+    if issues:
+        problem_files += 1
+    for key, _ in issues:
+        counts[key] = counts.get(key, 0) + 1
+
+    if mode == "full":
+        v2desc = "none"
+        if t2 is not None:
+            encs = {ENC.get(fr.encoding[0] if isinstance(fr.encoding, bytes) else fr.encoding, "?")
+                    for frames in t2.frame_set.values() for fr in frames
+                    if getattr(fr, "encoding", None) is not None}
+            v2desc = id3.versionToString(t2.version) + (" (" + ",".join(sorted(encs)) + ")" if encs else "")
+        v1desc = id3.versionToString(t1.version) if t1 is not None else "none"
+        print("=" * 100)
+        print(path)
+        print(f"  v2: {v2desc}   v1: {v1desc}")
+        print(f"  {'field':7} {'v2':32} {'v1':32} status")
+        for f in FIELDS:
+            a = v2[f] if v2 else ""
+            b = v1[f] if v1 else ""
+            st = status(f, a, v1[f] if v1 else None, t2) if t2 is not None else "no v2"
+            print(f"  {f:7} {cut(a):32} {cut(b):32} {st}")
+        for _, msg in issues:
+            print(f"  ! {msg}")
+    else:
+        for _, msg in issues:
+            print(f"{path}: {msg}")
+
+print("=" * 100 if mode == "full" else "")
+print(f"{len(files)} files, {problem_files} with problems")
+for key in sorted(counts):
+    print(f"  {counts[key]:4}  {key}")
+PY
+  echo -e "${blue}report saved to ${yellow}$PWD/$report${reset}"
+  pause
+} # tag_report
+
+sync_v1_from_v2() {
+  option="--to-v1.1"
+  echo -e "${yellow}\tsync v1 tags from v2 tags ${reset}"
+  echo -e "${blue}eyeD3 $option  (v2 is left as is, v1 text is cut to 30 chars)"
+  echo -e "${yellow} about to modify all mp3s in PWD"
+  are_we_committing
+  if [ "$committing" = 'yes' ]; then
+    for f in *.mp3; do
+      if eyeD3 -2 "$f" 2>&1 | grep -q "No ID3 v2.x tag"; then
+        echo -e "${red}Skipping:${reset} \"$f\" has no v2 tag to copy"
+        continue
+      fi
+      eyeD3 -l error $option "$f" >/dev/null && echo -e "${white}Success: ${blue}\"$f\"${reset}"
+    done
+  else
+    echo -e "${blue}ok... we do nothing then...bailing${reset}"
+  fi
+  echo -e ${reset}
+} # sync_v1_from_v2
+
+junk_txxx_opts=(--user-text-frame="major_brand:" --user-text-frame="minor_version:" --user-text-frame="compatible_brands:")
+
+strip_junk_txxx() {
+  echo -e "${yellow}\tstrip ffmpeg TXXX frames (major_brand, minor_version, compatible_brands)${reset}"
+  echo -e "${yellow} about to modify all mp3s in PWD"
+  are_we_committing
+  if [ "$committing" = 'yes' ]; then
+    for f in *.mp3; do
+      eyeD3 -l error "${junk_txxx_opts[@]}" "$f" >/dev/null && echo -e "${white}Success: ${blue}\"$f\"${reset}"
+    done
+  else
+    echo -e "${blue}ok... we do nothing then...bailing${reset}"
+  fi
+  echo -e ${reset}
+} # strip_junk_txxx
+
+car_prep() {
+  # per file: fill empty artist/title from "artist - title" filename,
+  # strip junk TXXX, convert to v2.3, then write v1.1 from v2
+  echo -e "${yellow}\tCar prep${reset}"
+  echo -e "${blue}per file: fill empty artist/title from filename, strip junk TXXX, convert to v2.3, sync v1${reset}"
+  local name artist title fill
+  for f in *.mp3; do
+    name="$(basename "${f%.*}")"
+    artist="$(eyeD3 -2 -l error "$f" 2>/dev/null | awk '/^artist:/' | sed 's/^artist: //;s/[[:space:]]*$//')"
+    title="$(eyeD3 -2 -l error "$f" 2>/dev/null | awk '/^title:/' | sed 's/^title: //;s/[[:space:]]*$//')"
+    if [[ -n "$artist" && -n "$title" ]]; then
+      echo -e "${blue}\"$f\"${reset} tags ok"
+    elif is_artist_title_name "$name"; then
+      echo -e "${blue}\"$f\"${yellow} fill empty artist/title from filename${reset}"
+    else
+      echo -e "${red}\"$f\" missing artist/title and filename is not \"artist - title\" - fix by hand${reset}"
+    fi
+  done
+
+  echo -e "${yellow} about to modify all mp3s in PWD"
+  are_we_committing
+  if [ "$committing" != 'yes' ]; then
+    echo -e "${blue}ok... we do nothing then...bailing${reset}"
+    return
+  fi
+
+  for f in *.mp3; do
+    name="$(basename "${f%.*}")"
+    artist="$(eyeD3 -2 -l error "$f" 2>/dev/null | awk '/^artist:/' | sed 's/^artist: //;s/[[:space:]]*$//')"
+    title="$(eyeD3 -2 -l error "$f" 2>/dev/null | awk '/^title:/' | sed 's/^title: //;s/[[:space:]]*$//')"
+    fill=()
+    if is_artist_title_name "$name"; then
+      [[ -z "$artist" ]] && fill+=(-a "$(echo "${name%% - *}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')")
+      [[ -z "$title" ]] && fill+=(-t "$(echo "${name#* - }" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')")
+    fi
+    if eyeD3 -l error "${fill[@]}" "${junk_txxx_opts[@]}" --to-v2.3 "$f" >/dev/null &&
+      eyeD3 -l error --to-v1.1 "$f" >/dev/null; then
+      echo -e "${white}Success: ${blue}\"$f\"${reset}"
+    else
+      echo -e "${red}Failed: \"$f\"${reset}"
+    fi
+  done
+  echo -e ${reset}
+} # car_prep
+
 are_we_committing() {
   echo -en "${yellow}are_we_committing ?"
-  read -e -p " [y] " userentry
+  read -e -p " [y/N] " userentry
   echo -e "${reset}"
-  if [ "$userentry" = 'y' ]; then
-    committing="yes"
-  else
-    committing="no"
-  fi
+  case "$userentry" in
+  y | Y | yes | YES) committing="yes" ;;
+  *) committing="no" ;;
+  esac
 }
 
 # MAIN STARTS HERE
@@ -802,6 +1020,11 @@ until [ "$continue" = 'no' ]; do
   echo -e "[${white}rf${reset}] Remove Frame"
   echo -e "[${white}r1${reset}] Remove v1 tags"
   echo -e "[${white}23${reset}] Convert tags to v2.3"
+  echo -e "[${white}tr${reset}] Tag report - problems only (v1/v2 discrepancies)"
+  echo -e "[${white}trf${reset}] Tag report - full, v1 & v2 side by side"
+  echo -e "[${white}v1${reset}] Sync v1 tags from v2 (for old stereos)"
+  echo -e "[${white}jx${reset}] Strip junk ffmpeg TXXX frames"
+  echo -e "[${white}car${reset}] Car prep - fill from filename, strip junk, v2.3, sync v1"
   echo -e "[${white}a${reset}]rtist - bulk reset, user entry"
   echo -e "[${white}A${reset}]lbum - bulk reset, user entry"
   echo -e "[${white}Y${reset}]ear - bulk reset, user entry"
@@ -853,6 +1076,21 @@ until [ "$continue" = 'no' ]; do
     remove_all_tags
     # continue="yes"
     # continue="yes"
+  elif [ "$userentry" = 'tr' ]; then
+    tag_report problems
+    continue="yes"
+  elif [ "$userentry" = 'trf' ]; then
+    tag_report full
+    continue="yes"
+  elif [ "$userentry" = 'v1' ]; then
+    sync_v1_from_v2
+    continue="yes"
+  elif [ "$userentry" = 'jx' ]; then
+    strip_junk_txxx
+    continue="yes"
+  elif [ "$userentry" = 'car' ]; then
+    car_prep
+    continue="yes"
   elif [ "$userentry" = '23' ]; then
     convert_to_v23
     # continue="yes"
@@ -902,6 +1140,9 @@ until [ "$continue" = 'no' ]; do
   elif [ "$userentry" = 'at' ]; then
     ren_artist_title_from_tags
     continue="no"
+  elif [ "$userentry" = 'ta' ]; then
+    ren_title_artist
+    continue="no"
   elif [ "$userentry" = 'to' ]; then
     ren_title_only_from_tags
     continue="no"
@@ -913,10 +1154,6 @@ until [ "$continue" = 'no' ]; do
     continue="yes"
   elif [ "$userentry" = 'f' ]; then
     flipAround
-    continue="no"
-
-  elif [ "$userentry" = 's' ]; then
-    custom_special
     continue="no"
   fi
 done                                              # continue
