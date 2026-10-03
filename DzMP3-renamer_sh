@@ -346,31 +346,49 @@ set_artist_title_from_filename() {
   # sat
   echo -e "${yellow}set tags artist & title using filename's 1st & 2nd field.${reset}"
   echo -e "${blue}If our file is called \"artist - title\" we can scrap into tags ${reset} "
-  f=$(find . -maxdepth 1 -mindepth 1 -name '*.mp3' -printf '%f' -quit)
-  echo -e "file is \"$f\""
-  eyeD3 "$f" # let's see the track details
-  echo -e "I'm thinking that..."
-  ftb="$(basename "${f%.mp3}")"
-  newdata="$(echo "$ftb" | sed 's/ - .*$//')"
-  echo -e "${blue}artist is: $newdata"
-  newdata="$(echo "$ftb" | sed 's/^.* - //')"
-  echo -e "title is: $newdata ${reset}"
+  echo -e "${blue}filenames are cleaned first: en/em dash -> \" - \", video suffixes stripped ${reset}"
+  local name newf
+  for f in *.mp3; do
+    name="$(clean_name "$(basename "${f%.*}")")"
+    newf="$name.${f##*.}"
+    if [[ "$newf" != "$f" ]]; then
+      if [[ -e "$newf" ]]; then
+        echo -e "${red}\"$f\" would rename to \"$newf\" but that exists - not renaming${reset}"
+        name="$(basename "${f%.*}")"
+      else
+        echo -e "${blue}\"$f\"${yellow} rename to ${blue}\"$newf\"${reset}"
+      fi
+    fi
+    if is_artist_title_name "$name"; then
+      echo -e "${blue}\"$name\"${reset} artist: ${yellow}\"${name%% - *}\"${reset} title: ${yellow}\"${name#* - }\"${reset}"
+    else
+      echo -e "${red}\"$f\" filename is not \"artist - title\" - will skip${reset}"
+    fi
+  done
 
   are_we_committing
+  if [[ "$committing" != 'yes' ]]; then
+    echo -e "${blue}ok... we do nothing then...bailing${reset}"
+    return
+  fi
 
   for f in *.mp3; do
-    # SPECIFY TAG DATA HERE
-    newtag="a" # -a for artist
+    name="$(clean_name "$(basename "${f%.*}")")"
+    newf="$name.${f##*.}"
+    if [[ "$newf" != "$f" && ! -e "$newf" ]]; then
+      mv "$f" "$newf" && echo -e "${white}Renamed: ${blue}\"$f\" ${yellow}-> \"$newf\"${reset}" && f="$newf"
+    fi
     ftb="$(basename "${f%.*}")"
     if ! is_artist_title_name "$ftb"; then
       echo -e "\n${red}Skipping \"$f\" - filename is not \"artist - title\"${reset}"
       continue
     fi
-    newdata="$(echo "$ftb" | sed 's/ - .*$//')"
+    newtag="a" # -a for artist
+    newdata="${ftb%% - *}"
     set_tag_data
 
     newtag="t" # -t for title
-    newdata="$(echo "$ftb" | sed 's/^.* - //')"
+    newdata="${ftb#* - }"
     set_tag_data
   done
 } # set_artist_title_from_filename
@@ -774,13 +792,11 @@ is_artist_title_name() {
   [[ -n "$left" && -n "$right" && "$right" != *" - "* ]]
 } # is_artist_title_name
 
-tag_report() {
-  # $1 = problems | full ; compares ID3 v1 and v2 of each mp3 in PWD
-  local mode="$1"
-  local report="tag-report.txt"
-  echo -e "${yellow}\tTag report ($mode)${reset}"
-  python3 - "$mode" <<'PY' | tee "$report"
-import glob, logging, sys
+tag_check() {
+  # $1 = problems | full : print report of ID3 v1/v2 of each mp3 in PWD
+  # $1 = ok : print NUL-separated names of mp3s with no problems
+  python3 - "$1" <<'PY'
+import glob, logging, os, sys
 logging.disable(logging.CRITICAL)
 import eyed3
 from eyed3 import id3
@@ -838,7 +854,8 @@ def cut(s, n=30):
 
 files = sorted(glob.glob("*.[mM][pP]3"))
 if not files:
-    print("no mp3 files in this folder")
+    if mode != "ok":
+        print("no mp3 files in this folder")
     sys.exit(0)
 
 counts = {}
@@ -858,6 +875,10 @@ for path in files:
         txxx = {fr.description for fr in t2.frame_set.get(b"TXXX", [])}
         if txxx & JUNK:
             issues.append(("junk TXXX", "junk ffmpeg TXXX frames: " + ", ".join(sorted(txxx & JUNK))))
+        if v2["artist"] and v2["title"]:
+            want = f"{v2['artist']} - {v2['title']}".replace("/", "-")
+            if os.path.splitext(path)[0] != want:
+                issues.append(("filename != tags", f"filename does not match tags \"{want}\""))
     if t1 is None:
         issues.append(("no v1 tag", "no v1 tag"))
     elif t2 is not None:
@@ -865,6 +886,10 @@ for path in files:
             if status(f, v2[f], v1[f], t2) == "DIFF":
                 issues.append((f"v1 {f} differs", f"v1 {f} differs: v2 '{v2[f]}' / v1 '{v1[f]}'"))
 
+    if mode == "ok":
+        if not issues:
+            sys.stdout.write(path + "\0")
+        continue
     if issues:
         problem_files += 1
     for key, _ in issues:
@@ -893,13 +918,23 @@ for path in files:
         for _, msg in issues:
             print(f"{path}: {msg}")
 
+if mode == "ok":
+    sys.exit(0)
 print("=" * 100 if mode == "full" else "")
 print(f"{len(files)} files, {problem_files} with problems")
 for key in sorted(counts):
     print(f"  {counts[key]:4}  {key}")
 PY
+} # tag_check
+
+tag_report() {
+  # $1 = problems | full ; saved to $report as well as shown
+  local mode="$1"
+  local report="1-tag-report.txt"
+  echo -e "${yellow}\tTag report ($mode)${reset}"
+  tag_check "$mode" | tee "$report"
   echo -e "${blue}report saved to ${yellow}$PWD/$report${reset}"
-  pause
+  [[ "$2" == "nopause" ]] || pause
 } # tag_report
 
 sync_v1_from_v2() {
@@ -938,24 +973,142 @@ strip_junk_txxx() {
   echo -e ${reset}
 } # strip_junk_txxx
 
-car_prep() {
-  # per file: fill empty artist/title from "artist - title" filename,
-  # strip junk TXXX, convert to v2.3, then write v1.1 from v2
-  echo -e "${yellow}\tCar prep${reset}"
-  echo -e "${blue}per file: fill empty artist/title from filename, strip junk TXXX, convert to v2.3, sync v1${reset}"
-  local name artist title fill
-  for f in *.mp3; do
-    name="$(basename "${f%.*}")"
-    artist="$(eyeD3 -2 -l error "$f" 2>/dev/null | awk '/^artist:/' | sed 's/^artist: //;s/[[:space:]]*$//')"
-    title="$(eyeD3 -2 -l error "$f" 2>/dev/null | awk '/^title:/' | sed 's/^title: //;s/[[:space:]]*$//')"
-    if [[ -n "$artist" && -n "$title" ]]; then
-      echo -e "${blue}\"$f\"${reset} tags ok"
-    elif is_artist_title_name "$name"; then
-      echo -e "${blue}\"$f\"${yellow} fill empty artist/title from filename${reset}"
+clean_name() {
+  # filename stem -> en/em dash and "--" separators become " - ", common
+  # video suffixes are stripped (repeated, so "(Official Video) [HD]" both go)
+  local s="$1" prev
+  s="$(echo "$s" | sed -E 's/ (–|—|-{2,}) / - /g')"
+  while [[ "$s" != "$prev" ]]; do
+    prev="$s"
+    s="$(echo "$s" | sed -E \
+      -e 's/[[:space:]]*[([]((official|original)[[:space:]]+)?((music|lyric)[[:space:]]+)?(video|audio|visuali[sz]er|lyrics?|hd|hq)[])][[:space:]]*$//I' \
+      -e 's/[[:space:]]+-[[:space:]]+((official|original)[[:space:]]+((music|lyric)[[:space:]]+)?(video|audio|visuali[sz]er)|(music|lyric)[[:space:]]+video|lyrics|visuali[sz]er)[[:space:]]*$//I' \
+      -e 's/[[:space:]]+(HD|HQ)$//' \
+      -e 's/[[:space:]]+/ /g;s/^ //;s/ $//')"
+  done
+  echo "$s"
+} # clean_name
+
+move_ok_files() {
+  # move mp3s with no tag problems (tag_check ok) and an already clean
+  # filename into $1
+  local okdir="$1" g
+  while IFS= read -r -d '' g; do
+    [[ "$(clean_name "$(basename "${g%.*}")").${g##*.}" == "$g" ]] || continue
+    mkdir -p "$okdir"
+    if [[ -e "$okdir/$g" ]]; then
+      echo -e "${red}Not moved: \"$okdir/$g\" already exists${reset}"
     else
-      echo -e "${red}\"$f\" missing artist/title and filename is not \"artist - title\" - fix by hand${reset}"
+      mv "$g" "$okdir/" && echo -e "${white}tags ok, moved: ${blue}\"$g\" ${yellow}-> $okdir/${reset}"
+    fi
+  done < <(tag_check ok)
+} # move_ok_files
+
+car_plan() {
+  # decide what car_prep does with "$1"; sets globals:
+  #   plan_action : ok | fill | cleantags | fromtags | hand
+  #   plan_name   : filename stem to rename to (may equal the current one)
+  #   plan_fill   : eyeD3 args to set artist/title (array)
+  #   plan_why    : reason, for hand
+  local g="$1" now artist title tags
+  now="$(basename "${g%.*}")"
+  plan_name="$(clean_name "$now")"
+  plan_fill=()
+  plan_why=""
+  artist="$(eyeD3 -2 -l error "$g" 2>/dev/null | awk '/^artist:/' | sed 's/^artist: //;s/[[:space:]]*$//')"
+  title="$(eyeD3 -2 -l error "$g" 2>/dev/null | awk '/^title:/' | sed 's/^title: //;s/[[:space:]]*$//')"
+  if [[ -n "$artist" && -n "$title" ]]; then
+    tags="$artist - $title"
+    tags="${tags//\//-}" # same as tag_check: no "/" in filenames
+    if ! is_artist_title_name "$plan_name"; then
+      # filename unusable, tags complete: name the file from the tags
+      plan_action="fromtags"
+      plan_name="$(clean_name "$tags")"
+    elif [[ "$tags" == "$plan_name" ]]; then
+      plan_action="ok"
+    elif [[ "$(clean_name "$tags")" == "$plan_name" ]]; then
+      # tags carry the same junk the filename had, e.g. title "... HD"
+      plan_action="cleantags"
+      plan_fill=(-a "${plan_name%% - *}" -t "${plan_name#* - }")
+    else
+      plan_action="hand"
+      plan_why="filename and tags disagree, tags say \"$tags\""
+      plan_name="$now"
+    fi
+  elif is_artist_title_name "$plan_name"; then
+    plan_action="fill"
+    [[ -z "$artist" ]] && plan_fill+=(-a "${plan_name%% - *}")
+    [[ -z "$title" ]] && plan_fill+=(-t "${plan_name#* - }")
+  else
+    plan_action="hand"
+    plan_why="empty v2 artist/title, filename is not \"artist - title\""
+    plan_name="$now"
+  fi
+} # car_plan
+
+car_prep() {
+  # 1. move files that are already fine into $okdir
+  # 2. preview the rest, write 1-fix-by-hand.txt and 1-tag-report.txt (a log
+  #    of the state before fixing)
+  # 3. on confirm, per file (see car_plan): rename, set artist/title,
+  #    strip junk TXXX, convert to v2.3, write v1.1 from v2
+  # 4. move files that are now fine into $okdir
+  local okdir="1-tags-ok"
+  local newf
+  local handlist="1-fix-by-hand.txt"
+  local -a hand=() planned=() mp3s
+  local -A taken=() # rename targets already claimed in this preview
+  echo -e "${yellow}\tCar prep${reset}"
+  echo -e "${blue}per file: clean filename, match artist/title tags to filename, strip junk TXXX, convert to v2.3, sync v1, move to $okdir/${reset}"
+
+  move_ok_files "$okdir"
+  mp3s=(*.mp3)
+  if ((${#mp3s[@]} == 0)); then
+    rm -f "$handlist"
+    echo -e "${blue}no mp3s left that need fixing${reset}"
+    return
+  fi
+
+  local plan
+  for f in "${mp3s[@]}"; do
+    car_plan "$f"
+    newf="$plan_name.${f##*.}"
+    plan=""
+    if [[ "$plan_action" != hand && "$newf" != "$f" ]]; then
+      if [[ -e "$newf" || -n "${taken[$newf]}" ]]; then
+        plan_action="hand"
+        plan_why="would rename to \"$newf\" but that name is taken - duplicate?"
+      else
+        taken[$newf]=1
+        plan="rename to \"$newf\""
+      fi
+    fi
+    case "$plan_action" in
+    ok) ;;
+    fill) plan="${plan:+$plan, }fill empty artist/title from filename" ;;
+    cleantags) plan="${plan:+$plan, }reset artist/title from cleaned filename" ;;
+    fromtags) plan="${plan:+$plan, }(filename from artist/title tags)" ;;
+    hand)
+      echo -e "${red}\"$f\" $plan_why - fix by hand${reset}"
+      hand+=("$f: $plan_why")
+      plan=""
+      ;;
+    esac
+    if [[ -n "$plan" ]]; then
+      echo -e "${blue}\"$f\"${yellow} $plan${reset}"
+      planned+=("$f: $plan")
     fi
   done
+  if ((${#hand[@]})); then
+    printf '%s\n' "${hand[@]}" >"$handlist"
+    echo -e "${blue}fix-by-hand list saved to ${yellow}$PWD/$handlist${reset}"
+  else
+    rm -f "$handlist" # nothing to fix, drop any stale list
+  fi
+  tag_report problems nopause # log of the state before fixing
+  if ((${#planned[@]})); then
+    { echo; echo "planned fixes:"; printf '%s\n' "${planned[@]}"; } | tee -a "1-tag-report.txt"
+  fi
 
   echo -e "${yellow} about to modify all mp3s in PWD"
   are_we_committing
@@ -965,21 +1118,19 @@ car_prep() {
   fi
 
   for f in *.mp3; do
-    name="$(basename "${f%.*}")"
-    artist="$(eyeD3 -2 -l error "$f" 2>/dev/null | awk '/^artist:/' | sed 's/^artist: //;s/[[:space:]]*$//')"
-    title="$(eyeD3 -2 -l error "$f" 2>/dev/null | awk '/^title:/' | sed 's/^title: //;s/[[:space:]]*$//')"
-    fill=()
-    if is_artist_title_name "$name"; then
-      [[ -z "$artist" ]] && fill+=(-a "$(echo "${name%% - *}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')")
-      [[ -z "$title" ]] && fill+=(-t "$(echo "${name#* - }" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')")
+    car_plan "$f"
+    newf="$plan_name.${f##*.}"
+    if [[ "$plan_action" != hand && "$newf" != "$f" && ! -e "$newf" ]]; then
+      mv "$f" "$newf" && echo -e "${white}Renamed: ${blue}\"$f\" ${yellow}-> \"$newf\"${reset}" && f="$newf"
     fi
-    if eyeD3 -l error "${fill[@]}" "${junk_txxx_opts[@]}" --to-v2.3 "$f" >/dev/null &&
+    if eyeD3 -l error "${plan_fill[@]}" "${junk_txxx_opts[@]}" --to-v2.3 "$f" >/dev/null &&
       eyeD3 -l error --to-v1.1 "$f" >/dev/null; then
       echo -e "${white}Success: ${blue}\"$f\"${reset}"
     else
       echo -e "${red}Failed: \"$f\"${reset}"
     fi
   done
+  move_ok_files "$okdir"
   echo -e ${reset}
 } # car_prep
 
@@ -1024,7 +1175,7 @@ until [ "$continue" = 'no' ]; do
   echo -e "[${white}trf${reset}] Tag report - full, v1 & v2 side by side"
   echo -e "[${white}v1${reset}] Sync v1 tags from v2 (for old stereos)"
   echo -e "[${white}jx${reset}] Strip junk ffmpeg TXXX frames"
-  echo -e "[${white}car${reset}] Car prep - fill from filename, strip junk, v2.3, sync v1"
+  echo -e "[${white}car${reset}] Car prep - clean filename, match tags to filename, strip junk, v2.3, sync v1, move to 1-tags-ok/"
   echo -e "[${white}a${reset}]rtist - bulk reset, user entry"
   echo -e "[${white}A${reset}]lbum - bulk reset, user entry"
   echo -e "[${white}Y${reset}]ear - bulk reset, user entry"
